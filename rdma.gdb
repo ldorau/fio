@@ -1,0 +1,11 @@
+b fio_rdmaio_setup
+b fio_rdmaio_init
+b fio_rdmaio_post_init
+b fio_rdmaio_prep
+b fio_rdmaio_queue
+b fio_rdmaio_commit
+b fio_rdmaio_getevents
+b fio_rdmaio_event
+b fio_rdmaio_cleanup
+b fio_rdmaio_open_file
+b fio_rdmaio_close_file
