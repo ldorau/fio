@@ -1,9 +1,9 @@
 # Example rdma server job
 [global]
 ioengine=rdma
-port=[port]
-bs=1m
-size=100g
+port=8765
+bs=1k
+size=1m
 
 [receiver]
 rw=read
