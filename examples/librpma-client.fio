@@ -6,7 +6,7 @@
 
 [global]
 ioengine=librpma_client
-hostname=192.168.0.107
+hostname=192.168.42.15
 port=8765
 thread
 
