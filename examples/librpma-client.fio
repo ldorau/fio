@@ -6,8 +6,8 @@
 
 [global]
 ioengine=librpma_client
-hostname=[IP address the server is listening on] 
-port=[port the server is listening on]
+hostname=192.168.0.107
+port=7204
 thread
 
 # The client will get a remote memory region description after establishing
