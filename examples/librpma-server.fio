@@ -1,12 +1,12 @@
 # Example of the librpma server job
 [global]
 ioengine=librpma_server
-bindname=[IP address to listen on]
-port=[port to listen on]
+bindname=192.168.0.107
+port=7204
 
 # The server side spawns a single thread, opens and registers the whole
 # provided memory. The server accepts a connection, waits for it to end up,
 # and closes itself.
 
 [server]
-filename=[XXX device dax or an existing fsdax file]
+filename=/tmp/librpma_server # [XXX device dax or an existing fsdax file]
