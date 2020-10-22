@@ -34,6 +34,30 @@ struct example_common_data {
 	char descriptors[DESCRIPTORS_MAX_SIZE];
 };
 
+/*
+ * malloc_aligned -- allocate an aligned chunk of memory
+ */
+void *
+malloc_aligned(struct thread_data *td, size_t size)
+{
+	void *mem;
+
+	long pagesize = sysconf(_SC_PAGESIZE);
+	if (pagesize < 0) {
+		td_verror(td, errno, "sysconf");
+		return NULL;
+	}
+
+	/* allocate a page size aligned local memory pool */
+	errno = posix_memalign(&mem, (size_t)pagesize, size);
+	if (errno) {
+		td_verror(td, errno, "posix_memalign");
+		return NULL;
+	}
+
+	return mem;
+}
+
 /* client side implementation */
 
 struct client_options {
@@ -605,24 +629,70 @@ static struct fio_option fio_server_options[] = {
 
 struct server_data {
 	struct rpma_peer *peer;
+	struct rpma_conn *conn;
+	struct rpma_ep *ep;
+	void *file;
+	uint64_t file_size;
+	struct rpma_conn_private_data pdata;
 };
 
 static int server_init(struct thread_data *td)
 {
-	struct server_options *o = td->eo;
-	(void) o; /* XXX delete when o will be used */
-
 	/*
 	 * - allocate server's data
 	 * - find ibv_context using o->bindname
 	 * - create new peer and endpoint (o->bindname and o->port)
 	 */
+	struct server_options *o = td->eo;
+	struct server_data *sd;
+	struct ibv_context *dev = NULL;
+	int ret = 1;
 
 	/* configure logging thresholds to see more details */
 	rpma_log_set_threshold(RPMA_LOG_THRESHOLD, RPMA_LOG_LEVEL_DEBUG);
 	rpma_log_set_threshold(RPMA_LOG_THRESHOLD_AUX, RPMA_LOG_LEVEL_DEBUG);
 
+	/* allocate server's data */
+	sd = calloc(1, sizeof(struct server_data));
+	if (sd == NULL) {
+		td_verror(td, errno, "calloc");
+		return 1;
+	}
+
+	/* obtain an IBV context for a remote IP address */
+	ret = rpma_utils_get_ibv_context(o->bindname,
+				RPMA_UTIL_IBV_CONTEXT_LOCAL,
+				&dev);
+	if (ret) {
+		rpma_td_verror(td, ret, "rpma_utils_get_ibv_context");
+		goto err_free_sd;
+	}
+
+	/* create a new peer object */
+	ret = rpma_peer_new(dev, &sd->peer);
+	if (ret) {
+		rpma_td_verror(td, ret, "rpma_peer_new");
+		goto err_free_sd;
+	}
+
+	/* start a listening endpoint at addr:port */
+	ret = rpma_ep_listen(sd->peer, o->bindname, o->port, &sd->ep);
+	if (ret) {
+		rpma_td_verror(td, ret, "rpma_ep_listen");
+		goto err_peer_delete;
+	}
+
+	td->io_ops_data = sd;
+
 	return 0;
+
+err_peer_delete:
+	(void) rpma_peer_delete(&sd->peer);
+
+err_free_sd:
+	free(sd);
+
+	return ret;
 }
 
 static void server_cleanup(struct thread_data *td)
@@ -631,6 +701,17 @@ static void server_cleanup(struct thread_data *td)
 	 * - shutdown ep
 	 * - free peer
 	 */
+	struct server_data *sd =  td->io_ops_data;
+	int ret;
+
+	if (sd == NULL)
+		return;
+
+	if ((ret = rpma_ep_shutdown(&sd->ep)))
+		rpma_td_verror(td, ret, "rpma_ep_shutdown");
+
+	if ((ret = rpma_peer_delete(&sd->peer)))
+		rpma_td_verror(td, ret, "rpma_peer_delete");
 }
 
 static int server_open_file(struct thread_data *td, struct fio_file *f)
@@ -639,8 +720,75 @@ static int server_open_file(struct thread_data *td, struct fio_file *f)
 	 * - pmem_map_file
 	 * - rpma_mr_reg -> f->engine_data
 	 */
+	struct server_data *sd =  td->io_ops_data;
+	struct example_common_data *data;
+	struct rpma_mr_local *mr;
+	size_t mr_desc_size;
+	int ret;
 
-	return 0;
+/*
+	mode_t mode = 0;
+	size_t mapped_len;
+	int is_pmem;
+
+	if(td_rw(td))
+		mode = S_IWUSR | S_IRUSR;
+	else if (td_write(td))
+		mode = S_IWUSR;
+	else
+		mode = S_IRUSR;
+	if((sd->file = pmem_map_file(f->file_name, f->real_file_size,
+				PMEM_FILE_CREATE, mode, &mapped_len,
+				&is_pmem)) == NULL) {
+		td_verror(td, errno, "pmem_map_file");
+		return -1;
+	}
+*/
+
+	/* XXX f->real_file_size OR td->orig_buffer_size ??? */
+	printf("\n>>> f->real_file_size = %lu\n", f->real_file_size);
+	printf(">>> td->orig_buffer_size = %zu\n", td->orig_buffer_size);
+
+	sd->file_size = f->real_file_size;
+	if ((sd->file = malloc_aligned(td, sd->file_size)) == NULL) {
+		td_verror(td, errno, "malloc_aligned");
+		return -1;
+	}
+
+	// ??? if ((ret = rpma_mr_reg(sd->peer, td->orig_buffer, td->orig_buffer_size,
+	if ((ret = rpma_mr_reg(sd->peer, sd->file, sd->file_size,
+			RPMA_MR_USAGE_READ_DST | RPMA_MR_USAGE_READ_SRC |
+			RPMA_MR_USAGE_WRITE_DST | RPMA_MR_USAGE_WRITE_SRC,
+			&mr))) {
+		rpma_td_verror(td, ret, "rpma_mr_reg");
+		return -1;
+	}
+
+	/* get size of the memory region's descriptor */
+	ret = rpma_mr_get_descriptor_size(mr, &mr_desc_size);
+	if (ret)
+		return -1;
+
+	/* calculate data for the client write */
+	data = calloc(1, sizeof(struct example_common_data));
+	if (data == NULL) {
+		return -1;
+	}
+
+	data->data_offset = 0;
+	data->mr_desc_size = mr_desc_size;
+
+	/* get the memory region's descriptor */
+	ret = rpma_mr_get_descriptor(mr, &data->descriptors[0]);
+	if (ret)
+		return -1;
+
+	sd->pdata.ptr = data;
+	sd->pdata.len = sizeof(struct example_common_data);
+
+	f->engine_data = mr;
+
+	return ret;
 }
 
 static int server_close_file(struct thread_data *td, struct fio_file *f)
@@ -649,8 +797,21 @@ static int server_close_file(struct thread_data *td, struct fio_file *f)
 	 * - rpma_mr_dereg
 	 * - pmem_unmap
 	 */
+	struct server_data *sd =  td->io_ops_data;
+	struct rpma_mr_local *mr = f->engine_data;
+	int ret;
 
-	return 0;
+	if ((ret = rpma_mr_dereg(&mr)))
+		rpma_td_verror(td, ret, "rpma_mr_dereg");
+
+/*
+	if ((ret = pmem_unmap(sd->file, sd->file_size) < 0))
+		td_verror(td, errno, "pmem_unmap");
+*/
+	free(sd->file);
+	free(sd->pdata.ptr);
+
+	return ret;
 }
 
 static enum fio_q_status server_queue(struct thread_data *td,
@@ -661,8 +822,59 @@ static enum fio_q_status server_queue(struct thread_data *td,
 	 * - accept a single connection
 	 * - wait for the connection to close and cleanup
 	 */
+	static int already_done = 0;
+	struct server_data *sd =  td->io_ops_data;
+	struct rpma_conn_req *req = NULL;
+	struct rpma_conn *conn;
+	enum rpma_conn_event conn_event = RPMA_CONN_UNDEFINED;
+	int ret;
 
-	return FIO_Q_BUSY;
+	if (already_done)
+		return FIO_Q_BUSY;
+
+	/* receive an incoming connection request */
+	ret = rpma_ep_next_conn_req(sd->ep, NULL, &req);
+	if (ret) {
+		rpma_td_verror(td, ret, "rpma_ep_next_conn_req");
+		return FIO_Q_COMPLETED;
+	}
+
+	/*
+	 * connect / accept the connection request and obtain the connection
+	 * object
+	 */
+	ret = rpma_conn_req_connect(&req, &sd->pdata, &conn);
+	if (ret) {
+		rpma_td_verror(td, ret, "rpma_conn_req_connect");
+		(void) rpma_conn_req_delete(&req);
+		return ret;
+	}
+
+	/* wait for the connection to be established */
+	ret = rpma_conn_next_event(conn, &conn_event);
+	if (!ret && conn_event != RPMA_CONN_ESTABLISHED) {
+		fprintf(stderr,
+				"rpma_conn_next_event returned an unexptected event\n");
+		ret = -1;
+	}
+
+	if (ret)
+		(void) rpma_conn_delete(&conn);
+
+	/* wait for the connection to be closed */
+	conn_event = RPMA_CONN_UNDEFINED;
+	ret = rpma_conn_next_event(conn, &conn_event);
+	if (!ret && conn_event != RPMA_CONN_CLOSED) {
+		fprintf(stderr,
+				"rpma_conn_next_event returned an unexptected event\n");
+	}
+
+	ret |= rpma_conn_disconnect(conn);
+	ret |= rpma_conn_delete(&conn);
+
+	already_done = 1;
+
+	return FIO_Q_COMPLETED;
 }
 
 FIO_STATIC struct ioengine_ops ioengine_server = {
@@ -674,7 +886,7 @@ FIO_STATIC struct ioengine_ops ioengine_server = {
 	.queue			= server_queue,
 	.cleanup		= server_cleanup,
 	.flags			= FIO_SYNCIO | FIO_NOEXTEND | FIO_FAKEIO |
-				  FIO_NOSTATS,
+				  FIO_NOSTATS | FIO_DISKLESSIO,
 	.options		= fio_server_options,
 	.option_struct_size	= sizeof(struct server_options),
 };
