@@ -107,6 +107,10 @@ static int client_init(struct thread_data *td)
 	uint32_t cq_size;
 	int ret = 1;
 
+	/* configure logging thresholds to see more details */
+	rpma_log_set_threshold(RPMA_LOG_THRESHOLD, RPMA_LOG_LEVEL_DEBUG);
+	rpma_log_set_threshold(RPMA_LOG_THRESHOLD_AUX, RPMA_LOG_LEVEL_DEBUG);
+
 	/* allocate client's data */
 	cd = calloc(1, sizeof(struct client_data));
 	if (cd == NULL) {
@@ -613,6 +617,10 @@ static int server_init(struct thread_data *td)
 	 * - find ibv_context using o->bindname
 	 * - create new peer and endpoint (o->bindname and o->port)
 	 */
+
+	/* configure logging thresholds to see more details */
+	rpma_log_set_threshold(RPMA_LOG_THRESHOLD, RPMA_LOG_LEVEL_DEBUG);
+	rpma_log_set_threshold(RPMA_LOG_THRESHOLD_AUX, RPMA_LOG_LEVEL_DEBUG);
 
 	return 0;
 }
