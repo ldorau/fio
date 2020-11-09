@@ -6,8 +6,8 @@
 
 [global]
 ioengine=librpma_client
-hostname=[IP address the server is listening on] 
-port=[port the server is listening on]
+hostname=192.168.0.107
+port=7204
 thread
 
 # The client will get a remote memory region description after establishing
@@ -15,11 +15,9 @@ thread
 
 [client]
 create_serialize=0
-numjobs=1
-group_reporting=1
-iomem_align=[page size e.g. 4KiB, 2MiB, 1GiB]
-iodepth=[total # of ious]
-iodepth_batch_submit=[# of ious to submit at once]
-readwrite=[read/randread]
-blocksize=[block size]
-size=[XXX a space for a single thread?]
+iomem_align=4096	# [page size]
+iodepth=4		# [total # of ious]
+iodepth_batch_submit=2	# [# of ious to submit at once]
+readwrite=read		# [read/randread]
+blocksize=2048		# [block size]
+size=4096		# [XXX a space for a single thread?]
