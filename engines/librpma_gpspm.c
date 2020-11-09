@@ -29,6 +29,12 @@
 
 /* client's and server's common */
 
+#define KILOBYTE	1024
+#define MSG_SIZE_MAX	512
+
+#define SEND_OFFSET	0
+#define RECV_OFFSET	(SEND_OFFSET + MSG_SIZE_MAX)
+
 /*
  * Limited by the maximum length of the private data
  * for rdma_connect() in case of RDMA_PS_TCP (28 bytes).
@@ -41,6 +47,34 @@ struct workspace {
 	/* buffer containing mr_desc */
 	char descriptors[DESCRIPTORS_MAX_SIZE];
 };
+
+/*
+ * malloc_aligned -- allocate an aligned chunk of memory
+ */
+static void *
+malloc_aligned(size_t size)
+{
+	void *mem;
+	int ret;
+
+	long pagesize = sysconf(_SC_PAGESIZE);
+	if (pagesize < 0) {
+		perror("sysconf");
+		return NULL;
+	}
+
+	/* allocate a page size aligned local memory pool */
+	ret = posix_memalign(&mem, (size_t)pagesize, size);
+	if (ret) {
+		(void) fprintf(stderr, "posix_memalign: %s\n", strerror(ret));
+		return NULL;
+	}
+
+	/* zero the allocated memory */
+	memset(mem, 0, size);
+
+	return mem;
+}
 
 /* client side implementation */
 
@@ -233,6 +267,16 @@ struct server_data {
 
 	/* size of the mapped persistent memory */
 	size_t size_pmem;
+	int is_pmem;
+
+	/* messaging resources */
+	void *msg_ptr;
+	void *send_ptr;
+	void *recv_ptr;
+	struct rpma_mr_local *msg_mr;
+	GPSPMFlushRequest *flush_req;
+	GPSPMFlushResponse flush_resp;
+	size_t flush_resp_size;
 };
 
 static int server_init(struct thread_data *td)
@@ -241,6 +285,29 @@ static int server_init(struct thread_data *td)
 	struct server_data *sd;
 	struct ibv_context *dev = NULL;
 	int ret = 1;
+
+	/* configure logging thresholds to see more details */
+	rpma_log_set_threshold(RPMA_LOG_THRESHOLD, RPMA_LOG_LEVEL_DEBUG);
+	rpma_log_set_threshold(RPMA_LOG_THRESHOLD_AUX, RPMA_LOG_LEVEL_DEBUG);
+
+	/* allocate server's data */
+	sd = calloc(1, sizeof(struct server_data));
+	if (sd == NULL) {
+		td_verror(td, errno, "calloc");
+		return 1;
+	}
+
+	/* allocate messaging buffer */
+	sd->msg_ptr = malloc_aligned(KILOBYTE);
+	if (sd->msg_ptr == NULL) {
+		td_verror(td, errno, "malloc_aligned");
+		goto err_free_sd;
+	}
+
+	/* messaging resources */
+	gpspm_flush_response__init(&sd->flush_resp);
+	sd->send_ptr = (char *)sd->msg_ptr + SEND_OFFSET;
+	sd->recv_ptr = (char *)sd->msg_ptr + RECV_OFFSET;
 
 	if (td->o.mem_type == MEM_MMAP) {
 		/*
@@ -252,6 +319,7 @@ static int server_init(struct thread_data *td)
 		td->o.mem_type = 0;
 		/* XXX HACK - make the mem_type option unset */
 		td->o.set_options[1] &= ~(uint64_t)1;
+		sd->is_pmem = 1;
 	} else {
 		/*
 		 * Reset iomem hooks if mem_type != MEM_MMAP,
@@ -260,17 +328,7 @@ static int server_init(struct thread_data *td)
 		 */
 		td->io_ops->iomem_alloc = NULL;
 		td->io_ops->iomem_free = NULL;
-	}
-
-	/* configure logging thresholds to see more details */
-	rpma_log_set_threshold(RPMA_LOG_THRESHOLD, RPMA_LOG_LEVEL_DEBUG);
-	rpma_log_set_threshold(RPMA_LOG_THRESHOLD_AUX, RPMA_LOG_LEVEL_DEBUG);
-
-	/* allocate server's data */
-	sd = calloc(1, sizeof(struct server_data));
-	if (sd == NULL) {
-		td_verror(td, errno, "calloc");
-		return 1;
+		sd->is_pmem = 0;
 	}
 
 	/* obtain an IBV context for a remote IP address */
@@ -321,6 +379,14 @@ err_free_sd:
 	return ret;
 }
 
+static int server_post_init(struct thread_data *td)
+{
+	/*
+	 * - rpma_recv()
+	 */
+	return 0;
+}
+
 static void server_cleanup(struct thread_data *td)
 {
 	struct server_data *sd =  td->io_ops_data;
@@ -363,7 +429,8 @@ static int server_open_file(struct thread_data *td, struct fio_file *f)
 	ret = rpma_mr_reg(sd->peer, sd->orig_buffer_aligned, io_us_size,
 			RPMA_MR_USAGE_READ_DST | RPMA_MR_USAGE_READ_SRC |
 			RPMA_MR_USAGE_WRITE_DST | RPMA_MR_USAGE_WRITE_SRC |
-			RPMA_MR_USAGE_FLUSH_TYPE_PERSISTENT,
+			(sd->is_pmem ? RPMA_MR_USAGE_FLUSH_TYPE_PERSISTENT :
+				RPMA_MR_USAGE_FLUSH_TYPE_VISIBILITY),
 			&mr);
 	if (ret) {
 		rpma_td_verror(td, ret, "rpma_mr_reg");
