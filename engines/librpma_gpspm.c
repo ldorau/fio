@@ -208,19 +208,106 @@ static struct fio_option fio_server_options[] = {
 };
 
 struct server_data {
-	/* XXX */
+	struct rpma_peer *peer;
+	struct rpma_ep *ep;
+
+	/* size of the mapped persistent memory */
+	size_t size_pmem;
 };
 
 static int server_init(struct thread_data *td)
 {
+	struct server_options *o = td->eo;
+	struct server_data *sd;
+	struct ibv_context *dev = NULL;
+	char *port;
+	int ret = 1;
+
+	/* configure logging thresholds to see more details */
+	rpma_log_set_threshold(RPMA_LOG_THRESHOLD, RPMA_LOG_LEVEL_DEBUG);
+	rpma_log_set_threshold(RPMA_LOG_THRESHOLD_AUX, RPMA_LOG_LEVEL_DEBUG);
+
+	/* set value of port specific for the current thread */
+	ret = asprintf(&port, "%i", atoi(o->port) + td->thread_number - 1);
+	if (ret) {
+		log_err("asprintf() failed");
+		return 1;
+	}
+
+	/* allocate server's data */
+	sd = calloc(1, sizeof(struct server_data));
+	if (sd == NULL) {
+		td_verror(td, errno, "calloc");
+		return 1;
+	}
+
+	if (td->o.mem_type == MEM_MMAP) {
+		/*
+		 * Zero mem_type if mem_type == MEM_MMAP,
+		 * because we want server_iomem_alloc() to be called
+		 * in this case, but custom iomem hooks are called
+		 * only if mem_type has never been set before.
+		 */
+		td->o.mem_type = 0;
+		/* XXX HACK - make the mem_type option unset */
+		td->o.set_options[1] &= ~(uint64_t)1;
+	} else {
+		/*
+		 * Reset iomem hooks if mem_type != MEM_MMAP,
+		 * because server_iomem_alloc() should be called
+		 * only if td->o.mem_type == MEM_MMAP.
+		 */
+		td->io_ops->iomem_alloc = NULL;
+		td->io_ops->iomem_free = NULL;
+	}
+
+	/* obtain an IBV context for a remote IP address */
+	ret = rpma_utils_get_ibv_context(o->bindname,
+				RPMA_UTIL_IBV_CONTEXT_LOCAL,
+				&dev);
+	if (ret) {
+		rpma_td_verror(td, ret, "rpma_utils_get_ibv_context");
+		goto err_free_sd;
+	}
+
+	/* create a new peer object */
+	ret = rpma_peer_new(dev, &sd->peer);
+	if (ret) {
+		rpma_td_verror(td, ret, "rpma_peer_new");
+		goto err_free_sd;
+	}
+
+	/* start a listening endpoint at addr:port */
+	ret = rpma_ep_listen(sd->peer, o->bindname, port, &sd->ep);
+	free(port);
+	if (ret) {
+		rpma_td_verror(td, ret, "rpma_ep_listen");
+		goto err_peer_delete;
+	}
+
+	td->io_ops_data = sd;
+
 	/*
-	 * - configure logging thresholds
-	 * - allocate memory for server's data
-	 * - rpma_utils_get_ibv_context
-	 * - rpma_peer_new
-	 * - rpma_ep_listen(port=(base_port + thread_number - 1))
+	 * Each connection needs its own workspace which will be allocated as
+	 * io_u. So the number of io_us has to be equal to the number of
+	 * connections the server will handle and...
 	 */
+	td->o.iodepth = o->num_conns;
+
+	/*
+	 * ... a single io_u size has to be equal to the assumed workspace size.
+	 */
+	td->o.max_bs[DDIR_READ] = td->o.size;
+
 	return 0;
+
+err_peer_delete:
+	(void) rpma_peer_delete(&sd->peer);
+
+err_free_sd:
+	free(sd);
+
+	return ret;
 }
 
 static int server_post_init(struct thread_data *td)
