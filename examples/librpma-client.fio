@@ -6,7 +6,7 @@
 
 [global]
 ioengine=librpma_client
-hostname=[IP address the server is listening on] 
+hostname=192.168.100.5
 port=7204
 thread
 
