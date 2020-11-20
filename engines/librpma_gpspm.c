@@ -374,6 +374,9 @@ static void client_cleanup(struct thread_data *td)
 		if ((ret = rpma_send(cd->conn, cd->msg_mr, SEND_OFFSET, flush_req_size,
 					RPMA_F_COMPLETION_ON_ERROR, NULL)))
 			rpma_td_verror(td, ret, "rpma_send");
+		else
+			log_err(">>> client_commit: SEND the flush(offset: %lu, length: %lu) message\n",
+				Flush_req_last.offset, Flush_req_last.length);
 	}
 
 	/* deregister the iou's memory */
@@ -505,6 +508,8 @@ static int client_commit(struct thread_data *td)
 				return -1;
 			}
 
+			log_err(">>> client_commit: rpma_write done\n");
+
 			if (i != cd->io_u_queued_nr - 1)
 				continue;
 
@@ -524,6 +529,8 @@ static int client_commit(struct thread_data *td)
 				return -1;
 			}
 
+			log_err(">>> client_commit: rpma_recv done\n");
+
 			/* prepare a flush message and pack it to a send buffer */
 			flush_req.op_context = io_u->index;
 			flush_req_size = gpspm_flush_request__get_packed_size(&flush_req);
@@ -542,6 +549,9 @@ static int client_commit(struct thread_data *td)
 				rpma_td_verror(td, ret, "rpma_send");
 				return -1;
 			}
+
+			log_err(">>> client_commit: rpma_send(flush of offset: %lu, length: %lu) message\n",
+				flush_req.offset, flush_req.length);
 		} else {
 			log_err("unsupported IO mode: %s\n", io_ddir_name(io_u->ddir));
 			return -1;
@@ -592,6 +602,8 @@ static int client_getevent_process(struct thread_data *td)
 	int i;
 	int ret;
 
+	log_err(">>> client_getevent_process: checking for completions ...\n");
+
 	/* get a completion */
 	if ((ret = rpma_conn_completion_get(cd->conn, &cmpl))) {
 		/* lack of completion is not an error */
@@ -606,6 +618,11 @@ static int client_getevent_process(struct thread_data *td)
 	/* if io_us has completed with an error */
 	if (cmpl.op_status != IBV_WC_SUCCESS)
 		io_us_error = cmpl.op_status;
+	if (cmpl.op != RPMA_OP_RECV) {
+		log_err("unexpected completion (0x%" PRIXPTR " != 0x%" PRIXPTR ")\n",
+			(uintptr_t)cmpl.op, (uintptr_t)RPMA_OP_RECV);
+		return -1;
+	}
 
 	/* unpack a response from the received buffer */
 	flush_resp = gpspm_flush_response__unpack(NULL, cmpl.byte_len,
@@ -617,6 +634,9 @@ static int client_getevent_process(struct thread_data *td)
 
 	/* look for an io_u being completed */
 	memcpy(&io_u_index, &flush_resp->op_context, sizeof(unsigned int));
+
+	log_err(">>> client_getevent_process: received the RECV completion of iu #%u\n", io_u_index);
+
 	for (i = 0; i < cd->io_u_flight_nr; ++i) {
 		if (cd->io_us_flight[i]->index == io_u_index) {
 			cmpl_num = i + 1;
@@ -663,6 +683,8 @@ static int client_getevents(struct thread_data *td, unsigned int min,
 	int cmpl_num;
 	int ret;
 
+	log_err(">>> client_getevents START\n");
+
 	do {
 		cmpl_num = client_getevent_process(td);
 		if (cmpl_num > 0) {
@@ -672,6 +694,8 @@ static int client_getevents(struct thread_data *td, unsigned int min,
 			if (cmpl_num_total >= min)
 				break;
 
+			log_err(">>> client_getevents: too few completions, wait for more completions ... \n");
+
 			/* too few completions - wait */
 			ret = rpma_conn_completion_wait(cd->conn);
 			if (ret == 0 || ret == RPMA_E_NO_COMPLETION)
@@ -679,12 +703,16 @@ static int client_getevents(struct thread_data *td, unsigned int min,
 
 			/* an error occurred */
 			rpma_td_verror(td, ret, "rpma_conn_completion_wait");
+			log_err(">>> client_getevents ERROR 1\n");
 			return -1;
 		} else {
 			/* an error occurred */
+			log_err(">>> client_getevents ERROR 2\n");
 			return -1;
 		}
 	} while (cmpl_num_total < max);
+
+	log_err(">>> client_getevents END\n");
 
 	return cmpl_num_total;
 }
@@ -1079,6 +1107,8 @@ static int server_close_file(struct thread_data *td, struct fio_file *f)
 	return rv ? -1 : 0;
 }
 
+static int n_cmpl_recv;
+
 static enum fio_q_status server_queue(struct thread_data *td,
 					  struct io_u *io_u)
 {
@@ -1096,6 +1126,8 @@ static enum fio_q_status server_queue(struct thread_data *td,
 	int msg_index;
 	int ret;
 
+	log_err(">>> server_queue: START - waiting for the #%i completion of RECV ...\n", ++n_cmpl_recv);
+
 	/* wait for the completion to be ready */
 	if ((ret = rpma_conn_completion_wait(sd->conn)))
 		goto err_terminate;
@@ -1111,6 +1143,8 @@ static enum fio_q_status server_queue(struct thread_data *td,
 		goto err_terminate;
 	}
 
+	log_err(">>> server_queue: received the #%i RECV completion\n", n_cmpl_recv);
+
 	msg_index = (int)(uintptr_t)cmpl.op_context;
 	io_u_buff_offset = IO_U_BUFF_OFF_SERVER(msg_index);
 	send_buff_offset = io_u_buff_offset + SEND_OFFSET;
@@ -1124,6 +1158,9 @@ static enum fio_q_status server_queue(struct thread_data *td,
 		log_err("cannot unpack the flush request buffer\n");
 		goto err_terminate;
 	}
+
+	log_err(">>> server_queue: received the flush(offset: %lu, length: %lu) message\n",
+		flush_req->offset, flush_req->length);
 
 	if (IS_NOT_THE_LAST_MESSAGE(flush_req)) {
 		op_ptr = (char *)sd->mmap_ptr + flush_req->offset;
@@ -1144,6 +1181,8 @@ static enum fio_q_status server_queue(struct thread_data *td,
 		goto err_terminate;
 	}
 
+	log_err(">>> server_queue: posted RECV \n");
+
 	/* prepare a flush response and pack it to a send buffer */
 	flush_resp.op_context = flush_req->op_context;
 	flush_resp_size = gpspm_flush_response__get_packed_size(&flush_resp);
@@ -1160,6 +1199,8 @@ static enum fio_q_status server_queue(struct thread_data *td,
 	if ((ret = rpma_send(sd->conn, sd->msg_mr, send_buff_offset, flush_resp_size,
 			RPMA_F_COMPLETION_ON_ERROR, NULL)))
 		goto err_terminate;
+
+	log_err(">>> server_queue: END - sent the SEND\n");
 
 	return FIO_Q_COMPLETED;
 
