@@ -132,6 +132,14 @@ struct client_data {
 	int io_u_completed_nr;
 };
 
+unsigned iodepth_queues = 1;
+// 2 * (size / block_size) + 1
+// (write + send) * (size / block_size) + last_send
+unsigned iodepth_sq_size = 5;
+unsigned iodepth_cq_size = 1;
+unsigned iodepth_msgs_size = 1;
+unsigned iodepth_ious_size = 1;
+
 static int client_init(struct thread_data *td)
 {
 	struct client_options *o = td->eo;
@@ -157,19 +165,19 @@ static int client_init(struct thread_data *td)
 	}
 
 	/* allocate all in-memory queues */
-	cd->io_us_queued = calloc(td->o.iodepth, sizeof(struct io_u *));
+	cd->io_us_queued = calloc(iodepth_queues, sizeof(struct io_u *));
 	if (cd->io_us_queued == NULL) {
 		td_verror(td, errno, "calloc");
 		goto err_free_cd;
 	}
 
-	cd->io_us_flight = calloc(td->o.iodepth, sizeof(struct io_u *));
+	cd->io_us_flight = calloc(iodepth_queues, sizeof(struct io_u *));
 	if (cd->io_us_flight == NULL) {
 		td_verror(td, errno, "calloc");
 		goto err_free_io_us_queued;
 	}
 
-	cd->io_us_completed = calloc(td->o.iodepth, sizeof(struct io_u *));
+	cd->io_us_completed = calloc(iodepth_queues, sizeof(struct io_u *));
 	if (cd->io_us_completed == NULL) {
 		td_verror(td, errno, "calloc");
 		goto err_free_io_us_flight;
@@ -192,14 +200,14 @@ static int client_init(struct thread_data *td)
 	}
 
 	/* the send queue has to be big enough to accommodate all io_u's */
-	ret = rpma_conn_cfg_set_sq_size(cfg, td->o.iodepth);
+	ret = rpma_conn_cfg_set_sq_size(cfg, iodepth_sq_size);
 	if (ret) {
 		rpma_td_verror(td, ret, "rpma_conn_cfg_set_sq_size");
 		goto err_cfg_delete;
 	}
 
-	/* cq_size = ceil(td->o.iodepth / td->o.iodepth_batch) */
-	cq_size = (td->o.iodepth + td->o.iodepth_batch - 1) / td->o.iodepth_batch;
+	/* cq_size = ceil(iodepth_cq_size / td->o.iodepth_batch) */
+	cq_size = (iodepth_cq_size + td->o.iodepth_batch - 1) / td->o.iodepth_batch;
 
 	/*
 	 * The completion queue has to be big enough
@@ -310,8 +318,8 @@ static int client_post_init(struct thread_data *td)
 	int ret;
 
 	/* message buffers registration */
-	/* ceil(td->o.iodepth / td->o.iodepth_batch) * IO_U_BUF_LEN */
-	io_us_msgs_size = ((td->o.iodepth + td->o.iodepth_batch - 1) / td->o.iodepth_batch) * IO_U_BUF_LEN;
+	/* ceil(iodepth_msgs_size / td->o.iodepth_batch) * IO_U_BUF_LEN */
+	io_us_msgs_size = ((iodepth_msgs_size + td->o.iodepth_batch - 1) / td->o.iodepth_batch) * IO_U_BUF_LEN;
 
 	if ((ret = posix_memalign((void **)&cd->io_us_msgs,
 			page_size, io_us_msgs_size))) {
@@ -338,7 +346,7 @@ static int client_post_init(struct thread_data *td)
 	 * has paddings which can be omitted for the memory registration.
 	 */
 	io_us_size = (unsigned long long)td_max_bs(td) *
-			(unsigned long long)td->o.iodepth;
+			(unsigned long long)iodepth_ious_size;
 
 	if ((ret = rpma_mr_reg(cd->peer, cd->orig_buffer_aligned, io_us_size,
 			RPMA_MR_USAGE_READ_DST | RPMA_MR_USAGE_READ_SRC |
@@ -454,7 +462,7 @@ static enum fio_q_status client_queue(struct thread_data *td,
 {
 	struct client_data *cd = td->io_ops_data;
 
-	if (cd->io_u_queued_nr == (int)td->o.iodepth)
+	if (cd->io_u_queued_nr == (int)iodepth_queues)
 		return FIO_Q_BUSY;
 
 	/* XXX - implement synchronous variant */
