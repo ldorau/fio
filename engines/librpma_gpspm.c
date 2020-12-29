@@ -607,9 +607,21 @@ static int client_getevent_process(struct thread_data *td)
 	if (cmpl.op_status != IBV_WC_SUCCESS)
 		io_us_error = cmpl.op_status;
 
+	if (cmpl.op != RPMA_OP_RECV) {
+		(void) fprintf(stderr,
+				"unexpected cmpl.op value "
+				"(0x%" PRIXPTR " != 0x%" PRIXPTR ")\n",
+				(uintptr_t)cmpl.op,
+				(uintptr_t)RPMA_OP_RECV);
+	}
+
 	/* unpack a response from the received buffer */
 	flush_resp = gpspm_flush_response__unpack(NULL, cmpl.byte_len,
 			cmpl.op_context);
+
+	(void) fprintf(stderr, "cmpl.byte_len = %u, cmpl.op_context = %p\n",
+		cmpl.byte_len, cmpl.op_context);
+
 	if (flush_resp == NULL) {
 		log_err("Cannot unpack the flush response buffer\n");
 		return -1;
