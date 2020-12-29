@@ -673,7 +673,10 @@ static int client_getevents(struct thread_data *td, unsigned int min,
 				break;
 
 			/* too few completions - wait */
+			fprintf(stderr, "rpma_conn_completion_wait >>> START (cmpl_num_total %i < min %i) \n",
+				cmpl_num_total, min);
 			ret = rpma_conn_completion_wait(cd->conn);
+			fprintf(stderr, "rpma_conn_completion_wait >>> END \n");
 			if (ret == 0 || ret == RPMA_E_NO_COMPLETION)
 				continue;
 
