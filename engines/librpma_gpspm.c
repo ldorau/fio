@@ -145,6 +145,8 @@ static int client_init(struct thread_data *td)
 	struct example_common_data *data;
 	int ret = 1;
 
+	fprintf(stderr, ">>> %s() \n", __func__);
+
 	/* configure logging thresholds to see more details */
 	rpma_log_set_threshold(RPMA_LOG_THRESHOLD, RPMA_LOG_LEVEL_INFO);
 	rpma_log_set_threshold(RPMA_LOG_THRESHOLD_AUX, RPMA_LOG_LEVEL_ERROR);
@@ -309,6 +311,8 @@ static int client_post_init(struct thread_data *td)
 	unsigned int io_us_msgs_size;
 	int ret;
 
+	fprintf(stderr, ">>> %s() \n", __func__);
+
 	/* message buffers registration */
 	/* ceil(td->o.iodepth / td->o.iodepth_batch) * IO_U_BUF_LEN */
 	io_us_msgs_size = ((td->o.iodepth + td->o.iodepth_batch - 1) / td->o.iodepth_batch) * IO_U_BUF_LEN;
@@ -426,6 +430,8 @@ static int client_get_file_size(struct thread_data *td, struct fio_file *f)
 	struct client_data *cd = td->io_ops_data;
 	int ret;
 
+	fprintf(stderr, ">>> %s() \n", __func__);
+
 	if ((ret = rpma_mr_remote_get_size(cd->server_mr, &f->real_file_size)))
 		rpma_td_verror(td, ret, "rpma_mr_remote_get_size");
 
@@ -450,6 +456,8 @@ static enum fio_q_status client_queue(struct thread_data *td,
 					  struct io_u *io_u)
 {
 	struct client_data *cd = td->io_ops_data;
+
+	fprintf(stderr, ">>> %s() \n", __func__);
 
 	if (cd->io_u_queued_nr == (int)td->o.iodepth)
 		return FIO_Q_BUSY;
@@ -477,6 +485,8 @@ static int client_commit(struct thread_data *td)
 	size_t flush_req_size = 0;
 	int ret;
 	int i;
+
+	fprintf(stderr, ">>> %s() \n", __func__);
 
 	if (!cd->io_us_queued)
 		return -1;
@@ -592,6 +602,8 @@ static int client_getevent_process(struct thread_data *td)
 	int i;
 	int ret;
 
+	fprintf(stderr, ">>> %s() \n", __func__);
+
 	/* get a completion */
 	if ((ret = rpma_conn_completion_get(cd->conn, &cmpl))) {
 		/* lack of completion is not an error */
@@ -675,6 +687,8 @@ static int client_getevents(struct thread_data *td, unsigned int min,
 	int cmpl_num;
 	int ret;
 
+	fprintf(stderr, ">>> %s() \n", __func__);
+
 	do {
 		cmpl_num = client_getevent_process(td);
 		if (cmpl_num > 0) {
@@ -709,6 +723,8 @@ static struct io_u *client_event(struct thread_data *td, int event)
 	struct client_data *cd = td->io_ops_data;
 	struct io_u *io_u;
 	int i;
+
+	fprintf(stderr, ">>> %s() \n", __func__);
 
 	/* get the first io_u from the queue */
 	io_u = cd->io_us_completed[0];
@@ -835,6 +851,8 @@ static int server_init(struct thread_data *td)
 	struct ibv_context *dev = NULL;
 	int ret = 1;
 
+	fprintf(stderr, ">>> %s() \n", __func__);
+
 	/* configure logging thresholds to see more details */
 	rpma_log_set_threshold(RPMA_LOG_THRESHOLD, RPMA_LOG_LEVEL_INFO);
 	rpma_log_set_threshold(RPMA_LOG_THRESHOLD_AUX, RPMA_LOG_LEVEL_ERROR);
@@ -879,6 +897,8 @@ static int server_post_init(struct thread_data *td)
 	size_t io_u_buflen;
 	int ret;
 
+	fprintf(stderr, ">>> %s() \n", __func__);
+
 	/*
 	 * td->orig_buffer is not aligned. The engine requires aligned io_us
 	 * so FIO alignes up the address using the formula below.
@@ -916,6 +936,8 @@ static void server_cleanup(struct thread_data *td)
 	struct server_data *sd =  td->io_ops_data;
 	int ret;
 
+	fprintf(stderr, ">>> %s() \n", __func__);
+
 	if (sd == NULL)
 		return;
 
@@ -947,6 +969,8 @@ static int server_open_file(struct thread_data *td, struct fio_file *f)
 	int mmap_is_pmem;
 	int ret;
 	int i;
+
+	fprintf(stderr, ">>> %s() \n", __func__);
 
 	if (!f->file_name) {
 		log_err("fio: filename is not set\n");
@@ -1064,6 +1088,8 @@ static int server_close_file(struct thread_data *td, struct fio_file *f)
 	int ret;
 	int rv;
 
+	fprintf(stderr, ">>> %s() \n", __func__);
+
 	/* wait for the connection to be closed */
 	ret = rpma_conn_next_event(sd->conn, &conn_event);
 	if (!ret && conn_event != RPMA_CONN_CLOSED) {
@@ -1110,6 +1136,8 @@ static enum fio_q_status server_queue(struct thread_data *td,
 	void *op_ptr;
 	int msg_index;
 	int ret;
+
+	fprintf(stderr, ">>> %s() \n", __func__);
 
 	/* wait for the completion to be ready */
 	if ((ret = rpma_conn_completion_wait(sd->conn)))
