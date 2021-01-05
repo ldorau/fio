@@ -170,6 +170,8 @@ static int common_td_port(const char *port_base_str,
 
 static int client_init(struct thread_data *td)
 {
+	fprintf(stderr, ">>> %s()\n", __func__);
+
 	struct client_options *o = td->eo;
 	struct client_data *cd;
 	struct ibv_context *dev = NULL;
@@ -407,6 +409,8 @@ err_free_cd:
 
 static int client_post_init(struct thread_data *td)
 {
+	fprintf(stderr, ">>> %s()\n", __func__);
+
 	struct client_data *cd =  td->io_ops_data;
 	size_t io_us_size;
 	unsigned int io_us_msgs_size;
@@ -556,6 +560,8 @@ static void client_cleanup(struct thread_data *td)
 
 static int client_get_file_size(struct thread_data *td, struct fio_file *f)
 {
+	fprintf(stderr, ">>> %s()\n", __func__);
+
 	struct client_data *cd = td->io_ops_data;
 	int ret;
 
@@ -581,6 +587,8 @@ static int client_close_file(struct thread_data *td, struct fio_file *f)
 
 static inline int client_io_write(struct thread_data *td, struct io_u *io_u)
 {
+	fprintf(stderr, ">>> %s()\n", __func__);
+
 	struct client_data *cd = td->io_ops_data;
 	size_t src_offset = (char *)(io_u->xfer_buf) - cd->orig_buffer_aligned;
 	size_t dst_offset = cd->ws_offset + io_u->offset;
@@ -603,6 +611,8 @@ static inline int client_io_flush(struct thread_data *td,
 		struct io_u *first_io_u, struct io_u *last_io_u,
 		unsigned long long int len)
 {
+	fprintf(stderr, ">>> %s()\n", __func__);
+
 	struct client_data *cd = td->io_ops_data;
 	size_t io_u_buf_off = IO_U_NEXT_BUF_OFF_CLIENT(cd);
 	size_t send_offset = io_u_buf_off + SEND_OFFSET;
@@ -647,6 +657,8 @@ static inline int client_io_flush(struct thread_data *td,
 static enum fio_q_status client_queue_sync(struct thread_data *td,
 					  struct io_u *io_u)
 {
+	fprintf(stderr, ">>> %s()\n", __func__);
+
 	struct client_data *cd = td->io_ops_data;
 	struct rpma_completion cmpl;
 	GPSPMFlushResponse *flush_resp;
@@ -713,6 +725,8 @@ err:
 static enum fio_q_status client_queue(struct thread_data *td,
 					  struct io_u *io_u)
 {
+	fprintf(stderr, ">>> %s()\n", __func__);
+
 	struct client_data *cd = td->io_ops_data;
 
 	if (cd->io_u_queued_nr == (int)td->o.iodepth)
@@ -730,6 +744,8 @@ static enum fio_q_status client_queue(struct thread_data *td,
 
 static int client_commit(struct thread_data *td)
 {
+	fprintf(stderr, ">>> %s()\n", __func__);
+
 	struct client_data *cd = td->io_ops_data;
 	struct timespec now;
 	bool fill_time;
@@ -826,6 +842,8 @@ static int client_commit(struct thread_data *td)
 
 static int client_getevent_process(struct thread_data *td)
 {
+	fprintf(stderr, ">>> %s()\n", __func__);
+
 	struct client_data *cd = td->io_ops_data;
 	struct rpma_completion cmpl;
 	/* io_u->index of completed io_u (cmpl.op_context) */
@@ -912,6 +930,8 @@ static int client_getevent_process(struct thread_data *td)
 static int client_getevents(struct thread_data *td, unsigned int min,
 				unsigned int max, const struct timespec *t)
 {
+	fprintf(stderr, ">>> %s()\n", __func__);
+
 	/* total # of completed io_us */
 	int cmpl_num_total = 0;
 	/* # of completed io_us from a single event */
@@ -943,6 +963,8 @@ static int client_getevents(struct thread_data *td, unsigned int min,
 
 static struct io_u *client_event(struct thread_data *td, int event)
 {
+	fprintf(stderr, ">>> %s()\n", __func__);
+
 	struct client_data *cd = td->io_ops_data;
 	struct io_u *io_u;
 	int i;
@@ -1055,6 +1077,8 @@ struct server_data {
 
 static int server_init(struct thread_data *td)
 {
+	fprintf(stderr, ">>> %s()\n", __func__);
+
 	struct server_options *o = td->eo;
 	struct server_data *sd;
 	struct ibv_context *dev = NULL;
@@ -1099,6 +1123,8 @@ err_free_sd:
 
 static int server_post_init(struct thread_data *td)
 {
+	fprintf(stderr, ">>> %s()\n", __func__);
+
 	struct server_data *sd = td->io_ops_data;
 	size_t io_us_size;
 	size_t io_u_buflen;
@@ -1145,6 +1171,8 @@ static int server_post_init(struct thread_data *td)
 
 static void server_cleanup(struct thread_data *td)
 {
+	fprintf(stderr, ">>> %s()\n", __func__);
+
 	struct server_data *sd =  td->io_ops_data;
 	int ret;
 
@@ -1164,6 +1192,8 @@ static void server_cleanup(struct thread_data *td)
 
 static int server_open_file(struct thread_data *td, struct fio_file *f)
 {
+	fprintf(stderr, ">>> %s()\n", __func__);
+
 	struct server_data *sd =  td->io_ops_data;
 	struct server_options *o = td->eo;
 	enum rpma_conn_event conn_event = RPMA_CONN_UNDEFINED;
@@ -1355,6 +1385,8 @@ err_pmem_unmap:
 
 static int server_close_file(struct thread_data *td, struct fio_file *f)
 {
+	fprintf(stderr, ">>> %s()\n", __func__);
+
 	struct server_data *sd =  td->io_ops_data;
 	enum rpma_conn_event conn_event = RPMA_CONN_UNDEFINED;
 	int ret;
@@ -1392,6 +1424,8 @@ static int server_close_file(struct thread_data *td, struct fio_file *f)
 
 static int server_queue_process(struct thread_data *td)
 {
+	fprintf(stderr, ">>> %s()\n", __func__);
+
 	struct server_data *sd = td->io_ops_data;
 	struct rpma_completion cmpl;
 	GPSPMFlushRequest *flush_req;
@@ -1485,6 +1519,8 @@ err_terminate:
 static enum fio_q_status server_queue(struct thread_data *td,
 					  struct io_u *io_u)
 {
+	fprintf(stderr, ">>> %s()\n", __func__);
+
 	int ret;
 
 	do {
