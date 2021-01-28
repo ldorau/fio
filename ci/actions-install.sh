@@ -26,7 +26,7 @@ DPKGCFG
         librdmacm-dev
         valgrind
     )
-    if [ "${CI_EVENT}" == "schedule" ]; then
+    if [ "x" == "x" ]; then
         pkgs+=(
             libaio-dev
             libfl-dev
@@ -50,7 +50,7 @@ DPKGCFG
                 libpmemblk-dev
                 libtcmalloc-minimal4
             )
-            if [ "${CI_EVENT}" == "schedule" ]; then
+            if [ "x" == "x" ]; then
                 pkgs+=(
                     libglusterfs-dev
                     libiscsi-dev
