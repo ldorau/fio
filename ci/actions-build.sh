@@ -22,7 +22,7 @@ main() {
                     configure_flags+=(
                         "--enable-libnbd"
                     )
-                    if [ "${CI_EVENT}" == "schedule" ]; then
+                    if [ "x" == "x" ]; then
                         configure_flags+=(
                             "--enable-cuda"
                             "--enable-libiscsi"
